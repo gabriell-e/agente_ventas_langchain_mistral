@@ -1,0 +1,6 @@
+*.pyc
+__pycache__/
+temp_*
+.vscode/
+.idea/
+contexto_dataset.md
