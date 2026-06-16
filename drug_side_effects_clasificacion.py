@@ -74,249 +74,219 @@ embeddings = MistralAIEmbeddings(
 print(f"LLM Mistral configurado: mistral-large-latest, temperature=0")
 print(f"Embeddings Mistral configurados: mistral-embed")
 
-"""## 4. Carga del dataset
+"""## 4. Agente 1: Normalizador
 
-El archivo debe subirse a Colab con el nombre `drug_side_effects_5000.csv`.
+Encapsula carga, diagnostico, limpieza completa y analisis exploratorio del dataset.
 """
 
-# Cargar con encoding flexible
-encodings = ["utf-8", "latin1", "cp1252", "iso-8859-1"]
-df = None
-for enc in encodings:
-    try:
-        df = pd.read_csv("drug_side_effects_5000.csv", encoding=enc)
-        print(f"Cargado con encoding: {enc}")
-        break
-    except UnicodeDecodeError:
-        continue
+class AgenteNormalizador:
+    def __init__(self):
+        self.df = None
 
-print(f"Shape: {df.shape}")
-df.head()
+    def cargar_y_limpiar(self, ruta_csv):
+        encodings = ["utf-8", "latin1", "cp1252", "iso-8859-1"]
+        for enc in encodings:
+            try:
+                self.df = pd.read_csv(ruta_csv, encoding=enc)
+                print(f"Cargado con encoding: {enc}")
+                break
+            except UnicodeDecodeError:
+                continue
 
-"""## 5. Diagnostico inicial"""
+        print(f"Shape: {self.df.shape}")
+        self.df.head()
 
-print("=== INFO ===")
-df.info()
-print("\n=== NULLS ===")
-print(df.isnull().sum())
-print("\n=== DTYPES ===")
-print(df.dtypes)
-print("\n=== HEAD ===")
-df.head()
+        print("=== INFO ===")
+        self.df.info()
+        print("\n=== NULLS ===")
+        print(self.df.isnull().sum())
+        print("\n=== DTYPES ===")
+        print(self.df.dtypes)
+        print("\n=== HEAD ===")
+        self.df.head()
 
-"""## 6. Normalizacion del dataset
+        col_map = {
+            "PatientID": "patient_id",
+            " Age ": "age",
+            "GENDER": "gender",
+            "Country": "country",
+            "DrugName": "drug_name",
+            "Dosage (mg)": "dosage_mg",
+            "sideEffect": "side_effect",
+            " Severity ": "severity",
+            "Outcome": "outcome",
+            "Report Date": "report_date",
+            "TreatmentStart": "treatment_start_date",
+            "ChronicCondition": "chronic_condition",
+            "Smoker": "smoker",
+            "Alcohol Use": "alcohol_use",
+            "Hospitalized": "hospitalized",
+            "Recovery Days": "recovery_days",
+        }
+        self.df.rename(columns=col_map, inplace=True)
+        print(f"Columnas: {list(self.df.columns)}")
 
-### 6.1 Renombrar columnas a snake_case
-"""
+        def clean_age(val):
+            if pd.isna(val):
+                return np.nan
+            val = str(val).strip().lower()
+            val = val.replace("years", "").replace("year", "").replace("yo", "").replace("old", "").strip()
+            try:
+                return int(float(val))
+            except:
+                return np.nan
+        self.df["age"] = self.df["age"].apply(clean_age)
 
-col_map = {
-    "PatientID": "patient_id",
-    " Age ": "age",
-    "GENDER": "gender",
-    "Country": "country",
-    "DrugName": "drug_name",
-    "Dosage (mg)": "dosage_mg",
-    "sideEffect": "side_effect",
-    " Severity ": "severity",
-    "Outcome": "outcome",
-    "Report Date": "report_date",
-    "TreatmentStart": "treatment_start_date",
-    "ChronicCondition": "chronic_condition",
-    "Smoker": "smoker",
-    "Alcohol Use": "alcohol_use",
-    "Hospitalized": "hospitalized",
-    "Recovery Days": "recovery_days",
-}
-df.rename(columns=col_map, inplace=True)
-print(f"Columnas: {list(df.columns)}")
+        def clean_dosage(val):
+            if pd.isna(val):
+                return np.nan
+            val = str(val).strip().lower().replace("mg", "").replace(" ", "")
+            try:
+                return int(float(val))
+            except:
+                return np.nan
+        self.df["dosage_mg"] = self.df["dosage_mg"].apply(clean_dosage)
 
-"""### 6.2 Conversion de tipos numericos"""
+        def clean_recovery(val):
+            if pd.isna(val):
+                return np.nan
+            val = str(val).strip().lower().replace("days", "").replace("day", "").replace("d", "")
+            try:
+                return float(val)
+            except:
+                return np.nan
+        self.df["recovery_days"] = self.df["recovery_days"].apply(clean_recovery)
 
-# Age: limpiar "years", "yo", espacios
-def clean_age(val):
-    if pd.isna(val):
-        return np.nan
-    val = str(val).strip().lower()
-    val = val.replace("years", "").replace("year", "").replace("yo", "").replace("old", "").strip()
-    try:
-        return int(float(val))
-    except:
-        return np.nan
+        print(f"age: {self.df['age'].dtype}, min={self.df['age'].min()}, max={self.df['age'].max()}")
+        print(f"dosage_mg: {self.df['dosage_mg'].dtype}, min={self.df['dosage_mg'].min()}, max={self.df['dosage_mg'].max()}")
+        print(f"recovery_days: {self.df['recovery_days'].dtype}, min={self.df['recovery_days'].min()}, max={self.df['recovery_days'].max()}")
 
-df["age"] = df["age"].apply(clean_age)
+        def parse_date(val):
+            if pd.isna(val):
+                return pd.NaT
+            val = str(val).strip()
+            formats = ["%Y-%m-%d", "%d/%m/%Y", "%m-%d-%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]
+            for fmt in formats:
+                try:
+                    return pd.to_datetime(val, format=fmt)
+                except:
+                    continue
+            try:
+                return pd.to_datetime(val, dayfirst=True)
+            except:
+                return pd.NaT
+        self.df["report_date"] = self.df["report_date"].apply(parse_date)
+        self.df["treatment_start_date"] = self.df["treatment_start_date"].apply(parse_date)
+        print(f"report_date: {self.df['report_date'].dtype}")
+        print(f"treatment_start_date: {self.df['treatment_start_date'].dtype}")
 
-# Dosage: limpiar "mg"
-def clean_dosage(val):
-    if pd.isna(val):
-        return np.nan
-    val = str(val).strip().lower().replace("mg", "").replace(" ", "")
-    try:
-        return int(float(val))
-    except:
-        return np.nan
+        null_vals = ["nan", "NaN", "N/A", "NaT", "<NA>", "None", "none", "", "Unknown", "never"]
+        for col in self.df.select_dtypes(include="object").columns:
+            self.df[col] = self.df[col].astype(str).str.strip()
+            self.df[col] = self.df[col].replace(null_vals, np.nan)
+            self.df[col] = self.df[col].str.replace(r"\s+", " ", regex=True)
 
-df["dosage_mg"] = df["dosage_mg"].apply(clean_dosage)
+        def norm_gender(v):
+            if pd.isna(v): return np.nan
+            v = str(v).strip().lower()
+            return {"male": "Male", "m": "Male", "female": "Female", "f": "Female"}.get(v, v)
+        self.df["gender"] = self.df["gender"].apply(norm_gender)
 
-# Recovery days: limpiar "days", "d"
-def clean_recovery(val):
-    if pd.isna(val):
-        return np.nan
-    val = str(val).strip().lower().replace("days", "").replace("day", "").replace("d", "")
-    try:
-        return float(val)
-    except:
-        return np.nan
+        def norm_country(v):
+            if pd.isna(v): return np.nan
+            v = str(v).strip().title()
+            return {"Usa": "USA", "Us": "USA", "U.S.A": "USA", "Uk": "UK", "U.K": "UK"}.get(v, v)
+        self.df["country"] = self.df["country"].apply(norm_country)
 
-df["recovery_days"] = df["recovery_days"].apply(clean_recovery)
+        def norm_severity(v):
+            if pd.isna(v): return np.nan
+            return {"mild": "Mild", "moderate": "Moderate", "severe": "Severe"}.get(str(v).strip().lower(), v)
+        self.df["severity"] = self.df["severity"].apply(norm_severity)
 
-print(f"age: {df['age'].dtype}, min={df['age'].min()}, max={df['age'].max()}")
-print(f"dosage_mg: {df['dosage_mg'].dtype}, min={df['dosage_mg'].min()}, max={df['dosage_mg'].max()}")
-print(f"recovery_days: {df['recovery_days'].dtype}, min={df['recovery_days'].min()}, max={df['recovery_days'].max()}")
+        def norm_outcome(v):
+            if pd.isna(v): return np.nan
+            return {"recovered": "Recovered", "recovering": "Recovering",
+                    "fatal": "Fatal", "hospitalized": "Hospitalized"}.get(str(v).strip().lower(), v)
+        self.df["outcome"] = self.df["outcome"].apply(norm_outcome)
 
-"""### 6.3 Conversion de fechas"""
+        def norm_smoker(v):
+            if pd.isna(v): return np.nan
+            v = str(v).strip().lower()
+            return {"yes": "Yes", "y": "Yes", "no": "No", "n": "No"}.get(v, v)
+        self.df["smoker"] = self.df["smoker"].apply(norm_smoker)
 
-def parse_date(val):
-    if pd.isna(val):
-        return pd.NaT
-    val = str(val).strip()
-    formats = ["%Y-%m-%d", "%d/%m/%Y", "%m-%d-%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]
-    for fmt in formats:
-        try:
-            return pd.to_datetime(val, format=fmt)
-        except:
-            continue
-    try:
-        return pd.to_datetime(val, dayfirst=True)
-    except:
-        return pd.NaT
+        def norm_hosp(v):
+            if pd.isna(v): return np.nan
+            v = str(v).strip().lower()
+            return {"yes": "Yes", "true": "Yes", "no": "No", "false": "No"}.get(v, v)
+        self.df["hospitalized"] = self.df["hospitalized"].apply(norm_hosp)
 
-df["report_date"] = df["report_date"].apply(parse_date)
-df["treatment_start_date"] = df["treatment_start_date"].apply(parse_date)
+        self.df["drug_name"] = self.df["drug_name"].str.title().str.strip()
+        self.df["side_effect"] = self.df["side_effect"].str.title().str.strip()
+        self.df["chronic_condition"] = self.df["chronic_condition"].str.title().str.strip()
+        print("Strings limpiados y estandarizados.")
 
-print(f"report_date: {df['report_date'].dtype}")
-print(f"treatment_start_date: {df['treatment_start_date'].dtype}")
+        print("Nulos antes:")
+        print(self.df.isnull().sum())
+        print()
 
-"""### 6.4 Limpieza de strings y estandarizacion"""
+        self.df["age"] = self.df["age"].fillna(self.df["age"].median()).astype(int)
+        self.df["dosage_mg"] = self.df["dosage_mg"].fillna(self.df["dosage_mg"].median()).astype(int)
+        self.df["recovery_days"] = self.df["recovery_days"].fillna(self.df["recovery_days"].median())
 
-# Reemplazar strings que representan nulos
-null_vals = ["nan", "NaN", "N/A", "NaT", "<NA>", "None", "none", "", "Unknown", "never"]
+        for col in ["chronic_condition", "alcohol_use"]:
+            self.df[col] = self.df[col].fillna(self.df[col].mode()[0])
 
-for col in df.select_dtypes(include="object").columns:
-    df[col] = df[col].astype(str).str.strip()
-    df[col] = df[col].replace(null_vals, np.nan)
-    df[col] = df[col].str.replace(r"\s+", " ", regex=True)
+        self.df.dropna(subset=["report_date", "treatment_start_date"], inplace=True)
+        self.df.reset_index(drop=True, inplace=True)
 
-# Gender
-def norm_gender(v):
-    if pd.isna(v): return np.nan
-    v = str(v).strip().lower()
-    return {"male": "Male", "m": "Male", "female": "Female", "f": "Female"}.get(v, v)
-df["gender"] = df["gender"].apply(norm_gender)
+        print("Nulos despues:")
+        print(self.df.isnull().sum())
+        print(f"\nShape final: {self.df.shape}")
 
-# Country
-def norm_country(v):
-    if pd.isna(v): return np.nan
-    v = str(v).strip().title()
-    return {"Usa": "USA", "Us": "USA", "U.S.A": "USA", "Uk": "UK", "U.K": "UK"}.get(v, v)
-df["country"] = df["country"].apply(norm_country)
+        return self.df
 
-# Severity
-def norm_severity(v):
-    if pd.isna(v): return np.nan
-    return {"mild": "Mild", "moderate": "Moderate", "severe": "Severe"}.get(str(v).strip().lower(), v)
-df["severity"] = df["severity"].apply(norm_severity)
+    def generar_eda(self):
+        print("Distribucion de severidad:")
+        print(self.df["severity"].value_counts())
+        print()
+        print("Distribucion de outcome:")
+        print(self.df["outcome"].value_counts())
+        print()
+        print("Distribucion de hospitalized:")
+        print(self.df["hospitalized"].value_counts())
 
-# Outcome
-def norm_outcome(v):
-    if pd.isna(v): return np.nan
-    return {"recovered": "Recovered", "recovering": "Recovering",
-            "fatal": "Fatal", "hospitalized": "Hospitalized"}.get(str(v).strip().lower(), v)
-df["outcome"] = df["outcome"].apply(norm_outcome)
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+        self.df["severity"].value_counts().plot(kind="bar", ax=axes[0], title="Severidad")
+        self.df["outcome"].value_counts().plot(kind="bar", ax=axes[1], title="Outcome")
+        self.df["hospitalized"].value_counts().plot(kind="bar", ax=axes[2], title="Hospitalizado")
+        plt.tight_layout()
+        plt.show()
 
-# Smoker
-def norm_smoker(v):
-    if pd.isna(v): return np.nan
-    v = str(v).strip().lower()
-    return {"yes": "Yes", "y": "Yes", "no": "No", "n": "No"}.get(v, v)
-df["smoker"] = df["smoker"].apply(norm_smoker)
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 2, 1)
+        sns.boxplot(x="severity", y="age", data=self.df)
+        plt.title("Edad por severidad")
+        plt.subplot(1, 2, 2)
+        sns.boxplot(x="severity", y="dosage_mg", data=self.df)
+        plt.title("Dosis por severidad")
+        plt.tight_layout()
+        plt.show()
 
-# Hospitalized
-def norm_hosp(v):
-    if pd.isna(v): return np.nan
-    v = str(v).strip().lower()
-    return {"yes": "Yes", "true": "Yes", "no": "No", "false": "No"}.get(v, v)
-df["hospitalized"] = df["hospitalized"].apply(norm_hosp)
+        fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+        cat_cols = ["gender", "smoker", "chronic_condition", "alcohol_use", "country", "drug_name"]
+        for ax, col in zip(axes.flatten(), cat_cols):
+            crosstab = pd.crosstab(self.df[col], self.df["severity"], normalize="index")
+            crosstab.plot(kind="bar", stacked=True, ax=ax, legend=False)
+            ax.set_title(f"Severidad por {col}")
+            ax.tick_params(axis="x", rotation=45)
+        plt.tight_layout()
+        plt.show()
 
-# Title case para drug_name y side_effect
-df["drug_name"] = df["drug_name"].str.title().str.strip()
-df["side_effect"] = df["side_effect"].str.title().str.strip()
-df["chronic_condition"] = df["chronic_condition"].str.title().str.strip()
-
-print("Strings limpiados y estandarizados.")
-
-"""### 6.5 Manejo de nulos"""
-
-print("Nulos antes:")
-print(df.isnull().sum())
-print()
-
-# Imputar numericos con mediana
-df["age"] = df["age"].fillna(df["age"].median()).astype(int)
-df["dosage_mg"] = df["dosage_mg"].fillna(df["dosage_mg"].median()).astype(int)
-df["recovery_days"] = df["recovery_days"].fillna(df["recovery_days"].median())
-
-# Imputar categoricos con moda
-for col in ["chronic_condition", "alcohol_use"]:
-    df[col] = df[col].fillna(df[col].mode()[0])
-
-# Eliminar filas con fechas nulas
-df.dropna(subset=["report_date", "treatment_start_date"], inplace=True)
-df.reset_index(drop=True, inplace=True)
-
-print("Nulos despues:")
-print(df.isnull().sum())
-print(f"\nShape final: {df.shape}")
-
-"""## 7. Analisis Exploratorio (EDA)"""
-
-# Distribucion de severidad (target)
-print("Distribucion de severidad:")
-print(df["severity"].value_counts())
-print()
-print("Distribucion de outcome:")
-print(df["outcome"].value_counts())
-print()
-print("Distribucion de hospitalized:")
-print(df["hospitalized"].value_counts())
-
-fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-df["severity"].value_counts().plot(kind="bar", ax=axes[0], title="Severidad")
-df["outcome"].value_counts().plot(kind="bar", ax=axes[1], title="Outcome")
-df["hospitalized"].value_counts().plot(kind="bar", ax=axes[2], title="Hospitalizado")
-plt.tight_layout()
-plt.show()
-
-# Distribucion de edad por severidad
-plt.figure(figsize=(12, 4))
-plt.subplot(1, 2, 1)
-sns.boxplot(x="severity", y="age", data=df)
-plt.title("Edad por severidad")
-plt.subplot(1, 2, 2)
-sns.boxplot(x="severity", y="dosage_mg", data=df)
-plt.title("Dosis por severidad")
-plt.tight_layout()
-plt.show()
-
-# Variables categoricas vs severidad
-fig, axes = plt.subplots(2, 3, figsize=(15, 8))
-cat_cols = ["gender", "smoker", "chronic_condition", "alcohol_use", "country", "drug_name"]
-for ax, col in zip(axes.flatten(), cat_cols):
-    crosstab = pd.crosstab(df[col], df["severity"], normalize="index")
-    crosstab.plot(kind="bar", stacked=True, ax=ax, legend=False)
-    ax.set_title(f"Severidad por {col}")
-    ax.tick_params(axis="x", rotation=45)
-plt.tight_layout()
-plt.show()
+# --- Ejecucion del Agente 1 ---
+norm = AgenteNormalizador()
+df = norm.cargar_y_limpiar("drug_side_effects_5000.csv")
+norm.generar_eda()
 
 """## 8. Clasificacion: Prediccion de Severidad
 
