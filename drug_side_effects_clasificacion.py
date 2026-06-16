@@ -195,3 +195,61 @@ df["treatment_start_date"] = df["treatment_start_date"].apply(parse_date)
 
 print(f"report_date: {df['report_date'].dtype}")
 print(f"treatment_start_date: {df['treatment_start_date'].dtype}")
+
+"""### 6.4 Limpieza de strings y estandarizacion"""
+
+# Reemplazar strings que representan nulos
+null_vals = ["nan", "NaN", "N/A", "NaT", "<NA>", "None", "none", "", "Unknown", "never"]
+
+for col in df.select_dtypes(include="object").columns:
+    df[col] = df[col].astype(str).str.strip()
+    df[col] = df[col].replace(null_vals, np.nan)
+    df[col] = df[col].str.replace(r"\s+", " ", regex=True)
+
+# Gender
+def norm_gender(v):
+    if pd.isna(v): return np.nan
+    v = str(v).strip().lower()
+    return {"male": "Male", "m": "Male", "female": "Female", "f": "Female"}.get(v, v)
+df["gender"] = df["gender"].apply(norm_gender)
+
+# Country
+def norm_country(v):
+    if pd.isna(v): return np.nan
+    v = str(v).strip().title()
+    return {"Usa": "USA", "Us": "USA", "U.S.A": "USA", "Uk": "UK", "U.K": "UK"}.get(v, v)
+df["country"] = df["country"].apply(norm_country)
+
+# Severity
+def norm_severity(v):
+    if pd.isna(v): return np.nan
+    return {"mild": "Mild", "moderate": "Moderate", "severe": "Severe"}.get(str(v).strip().lower(), v)
+df["severity"] = df["severity"].apply(norm_severity)
+
+# Outcome
+def norm_outcome(v):
+    if pd.isna(v): return np.nan
+    return {"recovered": "Recovered", "recovering": "Recovering",
+            "fatal": "Fatal", "hospitalized": "Hospitalized"}.get(str(v).strip().lower(), v)
+df["outcome"] = df["outcome"].apply(norm_outcome)
+
+# Smoker
+def norm_smoker(v):
+    if pd.isna(v): return np.nan
+    v = str(v).strip().lower()
+    return {"yes": "Yes", "y": "Yes", "no": "No", "n": "No"}.get(v, v)
+df["smoker"] = df["smoker"].apply(norm_smoker)
+
+# Hospitalized
+def norm_hosp(v):
+    if pd.isna(v): return np.nan
+    v = str(v).strip().lower()
+    return {"yes": "Yes", "true": "Yes", "no": "No", "false": "No"}.get(v, v)
+df["hospitalized"] = df["hospitalized"].apply(norm_hosp)
+
+# Title case para drug_name y side_effect
+df["drug_name"] = df["drug_name"].str.title().str.strip()
+df["side_effect"] = df["side_effect"].str.title().str.strip()
+df["chronic_condition"] = df["chronic_condition"].str.title().str.strip()
+
+print("Strings limpiados y estandarizados.")
