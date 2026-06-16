@@ -172,3 +172,26 @@ df["recovery_days"] = df["recovery_days"].apply(clean_recovery)
 print(f"age: {df['age'].dtype}, min={df['age'].min()}, max={df['age'].max()}")
 print(f"dosage_mg: {df['dosage_mg'].dtype}, min={df['dosage_mg'].min()}, max={df['dosage_mg'].max()}")
 print(f"recovery_days: {df['recovery_days'].dtype}, min={df['recovery_days'].min()}, max={df['recovery_days'].max()}")
+
+"""### 6.3 Conversion de fechas"""
+
+def parse_date(val):
+    if pd.isna(val):
+        return pd.NaT
+    val = str(val).strip()
+    formats = ["%Y-%m-%d", "%d/%m/%Y", "%m-%d-%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]
+    for fmt in formats:
+        try:
+            return pd.to_datetime(val, format=fmt)
+        except:
+            continue
+    try:
+        return pd.to_datetime(val, dayfirst=True)
+    except:
+        return pd.NaT
+
+df["report_date"] = df["report_date"].apply(parse_date)
+df["treatment_start_date"] = df["treatment_start_date"].apply(parse_date)
+
+print(f"report_date: {df['report_date'].dtype}")
+print(f"treatment_start_date: {df['treatment_start_date'].dtype}")
