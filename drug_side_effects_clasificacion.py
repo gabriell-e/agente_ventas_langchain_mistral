@@ -317,3 +317,140 @@ for ax, col in zip(axes.flatten(), cat_cols):
     ax.tick_params(axis="x", rotation=45)
 plt.tight_layout()
 plt.show()
+
+"""## 8. Clasificacion: Prediccion de Severidad
+
+Objetivo: predecir la severidad del efecto secundario (Mild/Moderate/Severe) usando variables del paciente y del farmaco.
+
+### 8.1 Separacion de variables (X, y)
+"""
+
+# Target: severity
+y = df["severity"]
+
+# Features: excluir side_effect (data leakage - el efecto es consecuencia del target)
+feature_cols = ["age", "gender", "country", "drug_name", "dosage_mg",
+               "chronic_condition", "smoker", "alcohol_use"]
+X = df[feature_cols].copy()
+
+print(f"X shape: {X.shape}")
+print(f"y shape: {y.shape}")
+print(f"\nClases: {y.value_counts().to_dict()}")
+X.head()
+
+# Codificar target
+le = LabelEncoder()
+y_encoded = le.fit_transform(y)  # 0=Mild, 1=Moderate, 2=Severe
+print(f"Clases codificadas: {dict(zip(le.classes_, range(len(le.classes_))))}")
+
+"""### 8.2 Codificacion de variables categoricas"""
+
+X_encoded = pd.get_dummies(X, columns=["gender", "country", "drug_name",
+                                       "chronic_condition",
+                                       "smoker", "alcohol_use"],
+                          drop_first=True)
+print(f"X despues de one-hot: {X_encoded.shape}")
+print(f"Columnas: {list(X_encoded.columns[:10])}...")
+
+"""### 8.3 Division train/test"""
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X_encoded, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
+)
+print(f"Train: {X_train.shape}, Test: {X_test.shape}")
+print(f"Train distribution: {np.bincount(y_train)}")
+print(f"Test distribution: {np.bincount(y_test)}")
+
+"""### 8.4 Escalado de datos"""
+
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+print(f"X_train_scaled: media ~{X_train_scaled.mean():.2f}, std ~{X_train_scaled.std():.2f}")
+print(f"X_test_scaled: media ~{X_test_scaled.mean():.2f}, std ~{X_test_scaled.std():.2f}")
+
+"""### 8.5 Entrenamiento de modelos
+
+Probamos 4 algoritmos de clasificacion diferentes:
+"""
+
+models = {
+    "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced'),
+    "Decision Tree": DecisionTreeClassifier(random_state=42, class_weight='balanced'),
+    "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced'),
+    "Gradient Boosting": GradientBoostingClassifier(n_estimators=100, random_state=42),
+}
+
+results = {}
+for name, model in models.items():
+    model.fit(X_train_scaled, y_train)
+    y_pred = model.predict(X_test_scaled)
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, average="weighted")
+    results[name] = {"accuracy": acc, "f1_score": f1, "model": model}
+    print(f"{name:25s} -> Accuracy: {acc:.4f}, F1: {f1:.4f}")
+
+"""### 8.6 Evaluacion y seleccion del mejor modelo"""
+
+# Mostrar resultados
+results_df = pd.DataFrame([
+    {"Modelo": name, "Accuracy": v["accuracy"], "F1 Score": v["f1_score"]}
+    for name, v in results.items()
+])
+print(results_df.to_string(index=False))
+print()
+
+# Seleccionar el mejor
+best_name = max(results, key=lambda k: results[k]["f1_score"])
+best_model = results[best_name]["model"]
+print(f"MEJOR MODELO: {best_name}")
+print()
+
+# Reporte detallado del mejor modelo
+y_pred_best = best_model.predict(X_test_scaled)
+print("Classification Report:")
+print(classification_report(y_test, y_pred_best, target_names=le.classes_))
+
+# Matriz de confusion
+cm = confusion_matrix(y_test, y_pred_best)
+plt.figure(figsize=(6, 5))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+            xticklabels=le.classes_, yticklabels=le.classes_)
+plt.title(f"Matriz de confusion - {best_name}")
+plt.ylabel("Real")
+plt.xlabel("Predicho")
+plt.show()
+
+"""### 8.7 Predicciones con nuevos datos"""
+
+# Ejemplo: predecir severidad para un paciente nuevo
+nuevo_paciente = pd.DataFrame([{
+    "age": 55,
+    "gender": "Male",
+    "country": "USA",
+    "drug_name": "Atorvastatin",
+    "dosage_mg": 25,
+    "chronic_condition": "Hypertension",
+    "smoker": "Yes",
+    "alcohol_use": "Occasional",
+}])
+
+# Aplicar mismo preprocessing
+nuevo_encoded = pd.get_dummies(nuevo_paciente, columns=[
+    "gender", "country", "drug_name",
+    "chronic_condition", "smoker", "alcohol_use"
+], drop_first=True)
+
+# Alinear columnas con X_encoded
+nuevo_encoded = nuevo_encoded.reindex(columns=X_encoded.columns, fill_value=0)
+nuevo_scaled = scaler.transform(nuevo_encoded)
+
+# Predecir
+pred = best_model.predict(nuevo_scaled)
+proba = best_model.predict_proba(nuevo_scaled)
+
+print(f"Prediccion: {le.inverse_transform(pred)[0]}")
+print(f"Probabilidades:")
+for clase, prob in zip(le.classes_, proba[0]):
+    print(f"  {clase}: {prob:.2%}")
