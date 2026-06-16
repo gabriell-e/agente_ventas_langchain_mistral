@@ -103,3 +103,72 @@ print("\n=== DTYPES ===")
 print(df.dtypes)
 print("\n=== HEAD ===")
 df.head()
+
+"""## 6. Normalizacion del dataset
+
+### 6.1 Renombrar columnas a snake_case
+"""
+
+col_map = {
+    "PatientID": "patient_id",
+    " Age ": "age",
+    "GENDER": "gender",
+    "Country": "country",
+    "DrugName": "drug_name",
+    "Dosage (mg)": "dosage_mg",
+    "sideEffect": "side_effect",
+    " Severity ": "severity",
+    "Outcome": "outcome",
+    "Report Date": "report_date",
+    "TreatmentStart": "treatment_start_date",
+    "ChronicCondition": "chronic_condition",
+    "Smoker": "smoker",
+    "Alcohol Use": "alcohol_use",
+    "Hospitalized": "hospitalized",
+    "Recovery Days": "recovery_days",
+}
+df.rename(columns=col_map, inplace=True)
+print(f"Columnas: {list(df.columns)}")
+
+"""### 6.2 Conversion de tipos numericos"""
+
+# Age: limpiar "years", "yo", espacios
+def clean_age(val):
+    if pd.isna(val):
+        return np.nan
+    val = str(val).strip().lower()
+    val = val.replace("years", "").replace("year", "").replace("yo", "").replace("old", "").strip()
+    try:
+        return int(float(val))
+    except:
+        return np.nan
+
+df["age"] = df["age"].apply(clean_age)
+
+# Dosage: limpiar "mg"
+def clean_dosage(val):
+    if pd.isna(val):
+        return np.nan
+    val = str(val).strip().lower().replace("mg", "").replace(" ", "")
+    try:
+        return int(float(val))
+    except:
+        return np.nan
+
+df["dosage_mg"] = df["dosage_mg"].apply(clean_dosage)
+
+# Recovery days: limpiar "days", "d"
+def clean_recovery(val):
+    if pd.isna(val):
+        return np.nan
+    val = str(val).strip().lower().replace("days", "").replace("day", "").replace("d", "")
+    try:
+        return float(val)
+    except:
+        return np.nan
+
+df["recovery_days"] = df["recovery_days"].apply(clean_recovery)
+
+print(f"age: {df['age'].dtype}, min={df['age'].min()}, max={df['age'].max()}")
+print(f"dosage_mg: {df['dosage_mg'].dtype}, min={df['dosage_mg'].min()}, max={df['dosage_mg'].max()}")
+print(f"recovery_days: {df['recovery_days'].dtype}, min={df['recovery_days'].min()}, max={df['recovery_days'].max()}")
