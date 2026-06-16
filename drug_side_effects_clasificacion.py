@@ -454,3 +454,91 @@ print(f"Prediccion: {le.inverse_transform(pred)[0]}")
 print(f"Probabilidades:")
 for clase, prob in zip(le.classes_, proba[0]):
     print(f"  {clase}: {prob:.2%}")
+
+"""### 8.8 Clasificador con Transformer (DistilBERT)
+
+A diferencia de los modelos tradicionales que usan features tabulares, un transformer
+procesa el texto directamente. Creamos una descripcion textual de cada caso y
+entrenamos DistilBERT para clasificar la severidad.
+"""
+
+from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification, Trainer, TrainingArguments
+
+# Crear texto descriptivo de cada fila
+def row_to_text_clf(row):
+    return f"{row['age']} anios {row['gender']} de {row['country']}. " \
+           f"Tomo {row['drug_name']} ({row['dosage_mg']} mg) por {row['chronic_condition']}. " \
+           f"Fumador: {row['smoker']}. Alcohol: {row['alcohol_use']}. " \
+           f"Efecto: {row['side_effect']}."
+
+texts_clf = df.apply(row_to_text_clf, axis=1).tolist()
+labels_clf = y_encoded  # 0=Mild, 1=Moderate, 2=Severe
+
+print(f"Total textos: {len(texts_clf)}")
+print(f"Ejemplo:\n{texts_clf[0]}")
+print(f"Label: {labels_clf[0]} ({le.classes_[labels_clf[0]]})")
+
+# Tokenizar
+tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
+
+train_texts, test_texts, train_labels, test_labels = train_test_split(
+    texts_clf, labels_clf, test_size=0.2, random_state=42, stratify=labels_clf
+)
+
+train_enc = tokenizer(train_texts, truncation=True, padding=True, max_length=128)
+test_enc = tokenizer(test_texts, truncation=True, padding=True, max_length=128)
+
+class DrugDataset(torch.utils.data.Dataset):
+    def __init__(self, encodings, labels):
+        self.encodings = encodings
+        self.labels = labels
+    def __getitem__(self, idx):
+        item = {k: torch.tensor(v[idx]) for k, v in self.encodings.items()}
+        item["labels"] = torch.tensor(self.labels[idx])
+        return item
+    def __len__(self):
+        return len(self.labels)
+
+train_dataset = DrugDataset(train_enc, train_labels)
+test_dataset = DrugDataset(test_enc, test_labels)
+
+print(f"Train: {len(train_dataset)}, Test: {len(test_dataset)}")
+
+model = DistilBertForSequenceClassification.from_pretrained(
+    "distilbert-base-uncased", num_labels=3
+)
+
+training_args = TrainingArguments(
+    output_dir="./results",
+    num_train_epochs=3,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=32,
+    eval_strategy="epoch",
+    save_strategy="epoch",
+    logging_steps=50,
+    load_best_model_at_end=True,
+    metric_for_best_model="accuracy",
+    report_to="none",
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=test_dataset,
+    compute_metrics=lambda eval_pred: {
+        "accuracy": (eval_pred.predictions.argmax(-1) == eval_pred.label_ids).mean(),
+        "f1": f1_score(eval_pred.label_ids, eval_pred.predictions.argmax(-1), average="weighted"),
+    },
+)
+
+trainer.train()
+
+print("=== TRANSFORMER (DistilBERT) ===")
+eval_result = trainer.evaluate()
+print(f"  Accuracy: {eval_result['eval_accuracy']:.4f}")
+print(f"  F1 Score: {eval_result['eval_f1']:.4f}")
+print()
+print("Comparacion con mejor modelo tradicional:")
+print(f"  {best_name}: F1={results[best_name]['f1_score']:.4f}")
+print(f"  DistilBERT: F1={eval_result['eval_f1']:.4f}")
