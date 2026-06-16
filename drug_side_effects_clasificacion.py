@@ -73,3 +73,33 @@ embeddings = MistralAIEmbeddings(
 
 print(f"LLM Mistral configurado: mistral-large-latest, temperature=0")
 print(f"Embeddings Mistral configurados: mistral-embed")
+
+"""## 4. Carga del dataset
+
+El archivo debe subirse a Colab con el nombre `drug_side_effects_5000.csv`.
+"""
+
+# Cargar con encoding flexible
+encodings = ["utf-8", "latin1", "cp1252", "iso-8859-1"]
+df = None
+for enc in encodings:
+    try:
+        df = pd.read_csv("drug_side_effects_5000.csv", encoding=enc)
+        print(f"Cargado con encoding: {enc}")
+        break
+    except UnicodeDecodeError:
+        continue
+
+print(f"Shape: {df.shape}")
+df.head()
+
+"""## 5. Diagnostico inicial"""
+
+print("=== INFO ===")
+df.info()
+print("\n=== NULLS ===")
+print(df.isnull().sum())
+print("\n=== DTYPES ===")
+print(df.dtypes)
+print("\n=== HEAD ===")
+df.head()
