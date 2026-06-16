@@ -253,3 +253,26 @@ df["side_effect"] = df["side_effect"].str.title().str.strip()
 df["chronic_condition"] = df["chronic_condition"].str.title().str.strip()
 
 print("Strings limpiados y estandarizados.")
+
+"""### 6.5 Manejo de nulos"""
+
+print("Nulos antes:")
+print(df.isnull().sum())
+print()
+
+# Imputar numericos con mediana
+df["age"] = df["age"].fillna(df["age"].median()).astype(int)
+df["dosage_mg"] = df["dosage_mg"].fillna(df["dosage_mg"].median()).astype(int)
+df["recovery_days"] = df["recovery_days"].fillna(df["recovery_days"].median())
+
+# Imputar categoricos con moda
+for col in ["chronic_condition", "alcohol_use"]:
+    df[col] = df[col].fillna(df[col].mode()[0])
+
+# Eliminar filas con fechas nulas
+df.dropna(subset=["report_date", "treatment_start_date"], inplace=True)
+df.reset_index(drop=True, inplace=True)
+
+print("Nulos despues:")
+print(df.isnull().sum())
+print(f"\nShape final: {df.shape}")
