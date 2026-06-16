@@ -276,3 +276,44 @@ df.reset_index(drop=True, inplace=True)
 print("Nulos despues:")
 print(df.isnull().sum())
 print(f"\nShape final: {df.shape}")
+
+"""## 7. Analisis Exploratorio (EDA)"""
+
+# Distribucion de severidad (target)
+print("Distribucion de severidad:")
+print(df["severity"].value_counts())
+print()
+print("Distribucion de outcome:")
+print(df["outcome"].value_counts())
+print()
+print("Distribucion de hospitalized:")
+print(df["hospitalized"].value_counts())
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+df["severity"].value_counts().plot(kind="bar", ax=axes[0], title="Severidad")
+df["outcome"].value_counts().plot(kind="bar", ax=axes[1], title="Outcome")
+df["hospitalized"].value_counts().plot(kind="bar", ax=axes[2], title="Hospitalizado")
+plt.tight_layout()
+plt.show()
+
+# Distribucion de edad por severidad
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 2, 1)
+sns.boxplot(x="severity", y="age", data=df)
+plt.title("Edad por severidad")
+plt.subplot(1, 2, 2)
+sns.boxplot(x="severity", y="dosage_mg", data=df)
+plt.title("Dosis por severidad")
+plt.tight_layout()
+plt.show()
+
+# Variables categoricas vs severidad
+fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+cat_cols = ["gender", "smoker", "chronic_condition", "alcohol_use", "country", "drug_name"]
+for ax, col in zip(axes.flatten(), cat_cols):
+    crosstab = pd.crosstab(df[col], df["severity"], normalize="index")
+    crosstab.plot(kind="bar", stacked=True, ax=ax, legend=False)
+    ax.set_title(f"Severidad por {col}")
+    ax.tick_params(axis="x", rotation=45)
+plt.tight_layout()
+plt.show()
