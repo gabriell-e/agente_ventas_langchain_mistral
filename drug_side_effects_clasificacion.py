@@ -288,142 +288,126 @@ norm = AgenteNormalizador()
 df = norm.cargar_y_limpiar("drug_side_effects_5000.csv")
 norm.generar_eda()
 
-"""## 8. Clasificacion: Prediccion de Severidad
+"""## 8. Agente 2: Modelo de clasificacion
 
-Objetivo: predecir la severidad del efecto secundario (Mild/Moderate/Severe) usando variables del paciente y del farmaco.
-
-### 8.1 Separacion de variables (X, y)
+Encapsula separacion, codificacion, entrenamiento, evaluacion y prediccion de severidad.
 """
 
-# Target: severity
-y = df["severity"]
+class AgenteModelo:
+    def __init__(self):
+        self.le = None
+        self.y_encoded = None
+        self.X_encoded = None
+        self.X_train_scaled = None
+        self.X_test_scaled = None
+        self.y_train = None
+        self.y_test = None
+        self.scaler = None
+        self.results = None
+        self.best_name = None
+        self.best_model = None
 
-# Features: excluir side_effect (data leakage - el efecto es consecuencia del target)
-feature_cols = ["age", "gender", "country", "drug_name", "dosage_mg",
-               "chronic_condition", "smoker", "alcohol_use"]
-X = df[feature_cols].copy()
+    def preparar_datos(self, df):
+        feature_cols = ["age", "gender", "country", "drug_name", "dosage_mg",
+                        "chronic_condition", "smoker", "alcohol_use"]
+        X = df[feature_cols].copy()
 
-print(f"X shape: {X.shape}")
-print(f"y shape: {y.shape}")
-print(f"\nClases: {y.value_counts().to_dict()}")
-X.head()
+        self.le = LabelEncoder()
+        self.y_encoded = self.le.fit_transform(df["severity"])
+        print(f"Clases: {df['severity'].value_counts().to_dict()}")
+        print(f"Clases codificadas: {dict(zip(self.le.classes_, range(len(self.le.classes_))))}")
 
-# Codificar target
-le = LabelEncoder()
-y_encoded = le.fit_transform(y)  # 0=Mild, 1=Moderate, 2=Severe
-print(f"Clases codificadas: {dict(zip(le.classes_, range(len(le.classes_))))}")
+        self.X_encoded = pd.get_dummies(X, columns=["gender", "country", "drug_name",
+                                                     "chronic_condition",
+                                                     "smoker", "alcohol_use"],
+                                        drop_first=True)
+        print(f"X despues de one-hot: {self.X_encoded.shape}")
 
-"""### 8.2 Codificacion de variables categoricas"""
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+            self.X_encoded, self.y_encoded, test_size=0.2, random_state=42,
+            stratify=self.y_encoded
+        )
+        print(f"Train: {self.X_train.shape}, Test: {self.X_test.shape}")
+        print(f"Train distribution: {np.bincount(self.y_train)}")
+        print(f"Test distribution: {np.bincount(self.y_test)}")
 
-X_encoded = pd.get_dummies(X, columns=["gender", "country", "drug_name",
-                                       "chronic_condition",
-                                       "smoker", "alcohol_use"],
-                          drop_first=True)
-print(f"X despues de one-hot: {X_encoded.shape}")
-print(f"Columnas: {list(X_encoded.columns[:10])}...")
+        self.scaler = StandardScaler()
+        self.X_train_scaled = self.scaler.fit_transform(self.X_train)
+        self.X_test_scaled = self.scaler.transform(self.X_test)
 
-"""### 8.3 Division train/test"""
+        print(f"X_train_scaled: media ~{self.X_train_scaled.mean():.2f}, std ~{self.X_train_scaled.std():.2f}")
+        print(f"X_test_scaled: media ~{self.X_test_scaled.mean():.2f}, std ~{self.X_test_scaled.std():.2f}")
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X_encoded, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
-)
-print(f"Train: {X_train.shape}, Test: {X_test.shape}")
-print(f"Train distribution: {np.bincount(y_train)}")
-print(f"Test distribution: {np.bincount(y_test)}")
+    def entrenar_modelos(self):
+        models = {
+            "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced'),
+            "Decision Tree": DecisionTreeClassifier(random_state=42, class_weight='balanced'),
+            "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced'),
+            "Gradient Boosting": GradientBoostingClassifier(n_estimators=100, random_state=42),
+        }
+        self.results = {}
+        for name, model in models.items():
+            model.fit(self.X_train_scaled, self.y_train)
+            y_pred = model.predict(self.X_test_scaled)
+            acc = accuracy_score(self.y_test, y_pred)
+            f1 = f1_score(self.y_test, y_pred, average="weighted")
+            self.results[name] = {"accuracy": acc, "f1_score": f1, "model": model}
+            print(f"{name:25s} -> Accuracy: {acc:.4f}, F1: {f1:.4f}")
 
-"""### 8.4 Escalado de datos"""
+    def evaluar_mejor(self):
+        results_df = pd.DataFrame([
+            {"Modelo": name, "Accuracy": v["accuracy"], "F1 Score": v["f1_score"]}
+            for name, v in self.results.items()
+        ])
+        print(results_df.to_string(index=False))
+        print()
 
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+        self.best_name = max(self.results, key=lambda k: self.results[k]["f1_score"])
+        self.best_model = self.results[self.best_name]["model"]
+        print(f"MEJOR MODELO: {self.best_name}")
+        print()
 
-print(f"X_train_scaled: media ~{X_train_scaled.mean():.2f}, std ~{X_train_scaled.std():.2f}")
-print(f"X_test_scaled: media ~{X_test_scaled.mean():.2f}, std ~{X_test_scaled.std():.2f}")
+        y_pred_best = self.best_model.predict(self.X_test_scaled)
+        print("Classification Report:")
+        print(classification_report(self.y_test, y_pred_best, target_names=self.le.classes_))
 
-"""### 8.5 Entrenamiento de modelos
+        cm = confusion_matrix(self.y_test, y_pred_best)
+        plt.figure(figsize=(6, 5))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+                    xticklabels=self.le.classes_, yticklabels=self.le.classes_)
+        plt.title(f"Matriz de confusion - {self.best_name}")
+        plt.ylabel("Real")
+        plt.xlabel("Predicho")
+        plt.show()
 
-Probamos 4 algoritmos de clasificacion diferentes:
-"""
+    def predecir_nuevo(self, paciente_dict):
+        nuevo_paciente = pd.DataFrame([paciente_dict])
+        nuevo_encoded = pd.get_dummies(nuevo_paciente, columns=[
+            "gender", "country", "drug_name",
+            "chronic_condition", "smoker", "alcohol_use"
+        ], drop_first=True)
+        nuevo_encoded = nuevo_encoded.reindex(columns=self.X_encoded.columns, fill_value=0)
+        nuevo_scaled = self.scaler.transform(nuevo_encoded)
 
-models = {
-    "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced'),
-    "Decision Tree": DecisionTreeClassifier(random_state=42, class_weight='balanced'),
-    "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced'),
-    "Gradient Boosting": GradientBoostingClassifier(n_estimators=100, random_state=42),
-}
+        pred = self.best_model.predict(nuevo_scaled)
+        proba = self.best_model.predict_proba(nuevo_scaled)
 
-results = {}
-for name, model in models.items():
-    model.fit(X_train_scaled, y_train)
-    y_pred = model.predict(X_test_scaled)
-    acc = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred, average="weighted")
-    results[name] = {"accuracy": acc, "f1_score": f1, "model": model}
-    print(f"{name:25s} -> Accuracy: {acc:.4f}, F1: {f1:.4f}")
+        print(f"Prediccion: {self.le.inverse_transform(pred)[0]}")
+        print(f"Probabilidades:")
+        for clase, prob in zip(self.le.classes_, proba[0]):
+            print(f"  {clase}: {prob:.2%}")
 
-"""### 8.6 Evaluacion y seleccion del mejor modelo"""
-
-# Mostrar resultados
-results_df = pd.DataFrame([
-    {"Modelo": name, "Accuracy": v["accuracy"], "F1 Score": v["f1_score"]}
-    for name, v in results.items()
-])
-print(results_df.to_string(index=False))
-print()
-
-# Seleccionar el mejor
-best_name = max(results, key=lambda k: results[k]["f1_score"])
-best_model = results[best_name]["model"]
-print(f"MEJOR MODELO: {best_name}")
-print()
-
-# Reporte detallado del mejor modelo
-y_pred_best = best_model.predict(X_test_scaled)
-print("Classification Report:")
-print(classification_report(y_test, y_pred_best, target_names=le.classes_))
-
-# Matriz de confusion
-cm = confusion_matrix(y_test, y_pred_best)
-plt.figure(figsize=(6, 5))
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-            xticklabels=le.classes_, yticklabels=le.classes_)
-plt.title(f"Matriz de confusion - {best_name}")
-plt.ylabel("Real")
-plt.xlabel("Predicho")
-plt.show()
-
-"""### 8.7 Predicciones con nuevos datos"""
-
-# Ejemplo: predecir severidad para un paciente nuevo
-nuevo_paciente = pd.DataFrame([{
-    "age": 55,
-    "gender": "Male",
-    "country": "USA",
-    "drug_name": "Atorvastatin",
-    "dosage_mg": 25,
+# --- Ejecucion del Agente 2 ---
+modelo = AgenteModelo()
+modelo.preparar_datos(df)
+modelo.entrenar_modelos()
+modelo.evaluar_mejor()
+modelo.predecir_nuevo({
+    "age": 55, "gender": "Male", "country": "USA",
+    "drug_name": "Atorvastatin", "dosage_mg": 25,
     "chronic_condition": "Hypertension",
-    "smoker": "Yes",
-    "alcohol_use": "Occasional",
-}])
-
-# Aplicar mismo preprocessing
-nuevo_encoded = pd.get_dummies(nuevo_paciente, columns=[
-    "gender", "country", "drug_name",
-    "chronic_condition", "smoker", "alcohol_use"
-], drop_first=True)
-
-# Alinear columnas con X_encoded
-nuevo_encoded = nuevo_encoded.reindex(columns=X_encoded.columns, fill_value=0)
-nuevo_scaled = scaler.transform(nuevo_encoded)
-
-# Predecir
-pred = best_model.predict(nuevo_scaled)
-proba = best_model.predict_proba(nuevo_scaled)
-
-print(f"Prediccion: {le.inverse_transform(pred)[0]}")
-print(f"Probabilidades:")
-for clase, prob in zip(le.classes_, proba[0]):
-    print(f"  {clase}: {prob:.2%}")
+    "smoker": "Yes", "alcohol_use": "Occasional",
+})
 
 """### 8.8 Clasificador con Transformer (DistilBERT)
 
@@ -442,11 +426,11 @@ def row_to_text_clf(row):
            f"Efecto: {row['side_effect']}."
 
 texts_clf = df.apply(row_to_text_clf, axis=1).tolist()
-labels_clf = y_encoded  # 0=Mild, 1=Moderate, 2=Severe
+labels_clf = modelo.y_encoded  # 0=Mild, 1=Moderate, 2=Severe
 
 print(f"Total textos: {len(texts_clf)}")
 print(f"Ejemplo:\n{texts_clf[0]}")
-print(f"Label: {labels_clf[0]} ({le.classes_[labels_clf[0]]})")
+print(f"Label: {labels_clf[0]} ({modelo.le.classes_[labels_clf[0]]})")
 
 # Tokenizar
 tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
@@ -510,7 +494,7 @@ print(f"  Accuracy: {eval_result['eval_accuracy']:.4f}")
 print(f"  F1 Score: {eval_result['eval_f1']:.4f}")
 print()
 print("Comparacion con mejor modelo tradicional:")
-print(f"  {best_name}: F1={results[best_name]['f1_score']:.4f}")
+print(f"  {modelo.best_name}: F1={modelo.results[modelo.best_name]['f1_score']:.4f}")
 print(f"  DistilBERT: F1={eval_result['eval_f1']:.4f}")
 
 """## 9. Agente RAG con LangChain + Mistral AI
