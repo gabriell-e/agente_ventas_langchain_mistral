@@ -497,54 +497,14 @@ print("Comparacion con mejor modelo tradicional:")
 print(f"  {modelo.best_name}: F1={modelo.results[modelo.best_name]['f1_score']:.4f}")
 print(f"  DistilBERT: F1={eval_result['eval_f1']:.4f}")
 
-"""## 9. Agente RAG con LangChain + Mistral AI
+"""## 9. Agente 3: RAG con LangChain + Mistral AI
 
-Este agente permite hacer preguntas en lenguaje natural sobre el dataset de efectos secundarios.
-Usa MistralAIEmbeddings + FAISS via LangChain para busqueda semantica,
-y ChatMistralAI con un prompt de sistema robusto para generar respuestas sin sesgos.
+Encapsula creacion del vectorstore FAISS, prompt de sistema antisesgos
+y respuestas a preguntas en lenguaje natural sobre el dataset.
 """
 
-# Convertir cada fila del DataFrame en un Document de LangChain
-def fila_a_documento(row) -> Document:
-    texto = (
-        f'Paciente {row["patient_id"]}: {row["age"]} anios, {row["gender"]}, {row["country"]}. '
-        f'Tomo {row["drug_name"]} ({row["dosage_mg"]} mg) y presento {row["side_effect"]}. '
-        f'Severidad: {row["severity"]}. Outcome: {row["outcome"]}. '
-        f'Condicion cronica: {row["chronic_condition"]}. Fumador: {row["smoker"]}. '
-        f'Alcohol: {row["alcohol_use"]}. Hospitalizado: {row["hospitalized"]}. '
-        f'Recuperacion: {row["recovery_days"]} dias.'
-    )
-    return Document(
-        page_content=texto,
-        metadata={
-            "patient_id": row["patient_id"],
-            "severity": row["severity"],
-            "drug_name": row["drug_name"],
-            "side_effect": row["side_effect"],
-            "outcome": row["outcome"],
-        }
-    )
-
-documentos = [fila_a_documento(row) for _, row in df.iterrows()]
-print(f"Documentos generados: {len(documentos)}")
-print(f"\nEjemplo:\n{documentos[0].page_content}")
-
-# Crear vectorstore con FAISS + MistralAIEmbeddings via LangChain
-print("Creando vectorstore...")
-vectorstore = FAISS.from_documents(documentos, embeddings)
-retriever = vectorstore.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": 5}
-)
-print(f"Vectorstore FAISS listo. Vectores indexados: {vectorstore.index.ntotal}")
-
-# Indexacion raw ya no es necesaria - LangChain FAISS wrapper maneja todo
-print(f"Usando retriever de LangChain con k=5")
-
-# ============================================================
-# Prompt de sistema anti-sesgos para el RAG farmacologico
-# ============================================================
-SYSTEM_PROMPT_RAG = """
+class AgenteRAG:
+    PROMPT_SISTEMA = """
 Eres un farmaco-epidemiologo experto y estrictamente honesto que analiza un dataset
 de reacciones adversas a medicamentos. Tienes acceso UNICAMENTE a los registros
 del dataset que se te proporcionan como contexto.
@@ -567,7 +527,7 @@ cronicas, y tiempos de recuperacion, pero no sobre [tema especifico]."
 3. No generalices a partir de unos pocos registros.
 
 ## FORMATO DE RESPUESTA
-- Responde SIEMPRE en español.
+- Responde SIEMPRE en espanol.
 - Si presentas numeros, indica explicitamente cuantos registros del dataset respaldan esa afirmacion.
 - Usa tablas si comparas categorias.
 
@@ -583,62 +543,90 @@ Eres preciso, directo y transparente. Prefieres decir "no se" o "no tengo esos d
 antes que dar una respuesta inventada o incompleta.
 """
 
-def preguntar_rag(pregunta: str, max_intentos: int = 3) -> str:
-    """
-    Responde preguntas sobre el dataset usando RAG: recupera los 5 registros
-    mas relevantes via similitud semantica y los usa como contexto para el LLM.
-    """
-    print("\n" + "=" * 60)
-    print(f"PREGUNTA RAG: {pregunta}")
-    print("=" * 60)
+    def __init__(self, df, embeddings_instancia, llm_instancia):
+        self.df = df
+        self.embeddings = embeddings_instancia
+        self.llm = llm_instancia
+        self.retriever = None
 
-    # Recuperar registros relevantes
-    fragmentos = retriever.invoke(pregunta)
+    def crear_base(self):
+        def fila_a_documento(row) -> Document:
+            texto = (
+                f'Paciente {row["patient_id"]}: {row["age"]} anios, {row["gender"]}, {row["country"]}. '
+                f'Tomo {row["drug_name"]} ({row["dosage_mg"]} mg) y presento {row["side_effect"]}. '
+                f'Severidad: {row["severity"]}. Outcome: {row["outcome"]}. '
+                f'Condicion cronica: {row["chronic_condition"]}. Fumador: {row["smoker"]}. '
+                f'Alcohol: {row["alcohol_use"]}. Hospitalizado: {row["hospitalized"]}. '
+                f'Recuperacion: {row["recovery_days"]} dias.'
+            )
+            return Document(
+                page_content=texto,
+                metadata={
+                    "patient_id": row["patient_id"], "severity": row["severity"],
+                    "drug_name": row["drug_name"], "side_effect": row["side_effect"],
+                    "outcome": row["outcome"],
+                }
+            )
 
-    if not fragmentos:
-        return "No encontre registros relevantes en el dataset."
+        documentos = [fila_a_documento(row) for _, row in self.df.iterrows()]
+        print(f"Documentos generados: {len(documentos)}")
+        print(f"\nEjemplo:\n{documentos[0].page_content}")
 
-    print(f"\nRegistros recuperados: {len(fragmentos)}")
-    for i, f in enumerate(fragmentos):
-        print(f"  [{i+1}] {f.page_content[:100]}...")
+        print("Creando vectorstore...")
+        vectorstore = FAISS.from_documents(documentos, self.embeddings)
+        self.retriever = vectorstore.as_retriever(
+            search_type="similarity", search_kwargs={"k": 5}
+        )
+        print(f"Vectorstore FAISS listo. Vectores indexados: {vectorstore.index.ntotal}")
+        print("Usando retriever de LangChain con k=5")
 
-    # Construir contexto
-    contexto = "\n\n".join(
-        [f"[Registro {i+1}]:\n{f.page_content}"
-         for i, f in enumerate(fragmentos)]
-    )
+    def preguntar(self, pregunta: str, max_intentos: int = 3) -> str:
+        import time
+        print("\n" + "=" * 60)
+        print(f"PREGUNTA RAG: {pregunta}")
+        print("=" * 60)
 
-    prompt_usuario = f"""
-    REGISTROS DEL DATASET:
-    {contexto}
+        fragmentos = self.retriever.invoke(pregunta)
+        if not fragmentos:
+            return "No encontre registros relevantes en el dataset."
 
-    PREGUNTA: {pregunta}
-    """
+        print(f"\nRegistros recuperados: {len(fragmentos)}")
+        for i, f in enumerate(fragmentos):
+            print(f"  [{i+1}] {f.page_content[:100]}...")
 
-    # Reintentos ante rate limit
-    import time
-    for intento in range(max_intentos):
-        try:
-            respuesta = llm.invoke([
-                SystemMessage(content=SYSTEM_PROMPT_RAG),
-                HumanMessage(content=prompt_usuario)
-            ])
-            print("\n" + "-" * 60)
-            print(f"RESPUESTA RAG:\n{respuesta.content}")
-            print("-" * 60)
-            return respuesta.content
-        except Exception as e:
-            if "429" in str(e):
-                espera = 20 * (intento + 1)
-                print(f"Rate limit. Esperando {espera}s... (intento {intento+1}/{max_intentos})")
-                time.sleep(espera)
-            else:
-                print(f"Error: {str(e)}")
-                return str(e)
+        contexto = "\n\n".join(
+            [f"[Registro {i+1}]:\n{f.page_content}" for i, f in enumerate(fragmentos)]
+        )
+        prompt_usuario = f"""
+REGISTROS DEL DATASET:
+{contexto}
 
-    return "No se pudo completar la consulta tras varios intentos."
+PREGUNTA: {pregunta}
+"""
 
-"""### 9.1 Probar el agente RAG"""
+        for intento in range(max_intentos):
+            try:
+                respuesta = self.llm.invoke([
+                    SystemMessage(content=self.PROMPT_SISTEMA),
+                    HumanMessage(content=prompt_usuario)
+                ])
+                print("\n" + "-" * 60)
+                print(f"RESPUESTA RAG:\n{respuesta.content}")
+                print("-" * 60)
+                return respuesta.content
+            except Exception as e:
+                if "429" in str(e):
+                    espera = 20 * (intento + 1)
+                    print(f"Rate limit. Esperando {espera}s... (intento {intento+1}/{max_intentos})")
+                    time.sleep(espera)
+                else:
+                    print(f"Error: {str(e)}")
+                    return str(e)
+        return "No se pudo completar la consulta tras varios intentos."
+
+# --- Ejecucion del Agente 3 ---
+rag = AgenteRAG(df, embeddings, llm)
+rag.crear_base()
 
 preguntas = [
     "Que efectos secundarios son mas comunes en pacientes con diabetes?",
@@ -646,29 +634,32 @@ preguntas = [
     "Que farmacos tienen mas probabilidad de causar hospitalizacion?",
     "Los fumadores tienen efectos secundarios mas severos?",
 ]
-
 for q in preguntas:
     print(f"\n{'='*60}")
     print(f"PREGUNTA: {q}")
     print(f"{'='*60}")
-    respuesta = preguntar_rag(q)
+    respuesta = rag.preguntar(q)
     print(f"\nRESPUESTA:\n{respuesta}")
 
 """## 10. Conclusiones
 
-Pipeline completo:
-1. Dataset desnormalizado con inconsistencias intencionales
-2. Normalizacion: limpieza de columnas, tipos, fechas, strings y nulos
-3. EDA: analisis exploratorio de variables
-4. Clasificacion: 4 algoritmos comparados, mejor modelo seleccionado
-5. RAG Agent con LangChain: busqueda semantica con FAISS + MistralAIEmbeddings
-6. Prompt de sistema robusto anti-sesgos para respuestas honestas y basadas solo en datos
+Pipeline completo con arquitectura de 3 agentes:
 
-**Mejoras aplicadas:**
-- Eliminado `side_effect` de features de clasificacion (data leakage)
-- Balanceo de clases con `class_weight='balanced'` para mejor prediccion de clases minoritarias
-- Corregida normalizacion de paises ("Us" -> "USA")
-- Migrado RAG a LangChain con `ChatMistralAI` y `MistralAIEmbeddings`
-- Agregado prompt de sistema anti-sesgos para prevenir alucinaciones
-- Reintentos automaticos ante rate limit de la API
+**Agente 1 - Normalizador (`AgenteNormalizador`):**
+- Carga flexible del CSV, diagnostico y renombre a snake_case
+- Conversion de tipos, fechas y estandarizacion de strings
+- Imputacion de nulos y analisis exploratorio (EDA)
+
+**Agente 2 - Modelo (`AgenteModelo`):**
+- Codificacion one-hot de categoricas, division train/test y escalado
+- Entrenamiento de 4 clasificadores con validacion y seleccion del mejor
+- Evaluacion detallada (reporte, matriz de confusion, nuevas predicciones)
+
+**Agente 3 - RAG (`AgenteRAG`):**
+- Vectorstore FAISS con embeddings Mistral via LangChain
+- Prompt de sistema antisesgos para respuestas solo basadas en datos
+- Reintentos automaticos ante rate limit de la API Mistral
+
+**Standalone:** DistilBERT como comparacion transformer contra modelos tabulares.
 """
+
